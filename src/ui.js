@@ -1,7 +1,10 @@
 import {
+  OUTCOMES,
   OUTCOME_CATALOG,
   DEFAULT_TABLE_IDS,
   buildTable,
+  outcomeForSum,
+  runnerMovements,
   newGame,
   applyRoll,
   rollWith,
@@ -23,6 +26,7 @@ const PIPS = {
 const WAYS = { 2:1,3:2,4:3,5:4,6:5,7:6,8:5,9:4,10:3,11:2,12:1 };
 
 const $ = (sel) => document.querySelector(sel);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Re-trigger a CSS animation class even if it's already present.
 function restartAnim(el, cls) {
@@ -33,27 +37,175 @@ function restartAnim(el, cls) {
 
 const FAN_COLORS = ['#d94f4f', '#4f7fd9', '#e0b341', '#5bbf6a', '#c45fb0', '#e8e8e8', '#e08a3c'];
 const SVGNS = 'http://www.w3.org/2000/svg';
+const HOME = [200, 340];
 
-// Fill the stands with rows of fans that follow the dome of the grandstand.
+// Base coordinates in the field's user space. SCORE shares home plate.
+const BASES = { H: [200, 340], 1: [280, 260], 2: [200, 180], 3: [120, 260], SCORE: [200, 340] };
+const RING = ['H', 1, 2, 3]; // running order around the diamond
+
+const elNS = (tag, attrs) => {
+  const e = document.createElementNS(SVGNS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+};
+const polar = (cx, cy, r, deg) => [cx + r * Math.cos((deg * Math.PI) / 180), cy + r * Math.sin((deg * Math.PI) / 180)];
+
+// --- scenery: mowing stripes, tiered crowd, light towers --------------------
+
+function buildScenery() {
+  buildStripes();
+  buildCrowd();
+  buildLights();
+}
+
+function buildStripes() {
+  const g = $('#stripes');
+  g.innerHTML = '';
+  const N = 9, R = 256;
+  for (let i = 0; i < N; i++) {
+    const a0 = -135 + (90 * i) / N;
+    const a1 = -135 + (90 * (i + 1)) / N;
+    const [x0, y0] = polar(HOME[0], HOME[1], R, a0);
+    const [x1, y1] = polar(HOME[0], HOME[1], R, a1);
+    g.appendChild(elNS('path', {
+      class: 'stripe',
+      d: `M${HOME[0]},${HOME[1]} L${x0.toFixed(1)},${y0.toFixed(1)} A${R},${R} 0 0,1 ${x1.toFixed(1)},${y1.toFixed(1)} Z`,
+      'fill-opacity': i % 2 ? 0.08 : 0,
+    }));
+  }
+}
+
 function buildCrowd() {
   const crowd = $('#crowd');
   crowd.innerHTML = '';
-  const cols = 17;
-  for (let c = 0; c < cols; c++) {
-    const x = 14 + c * (172 / (cols - 1));
-    const t = (x - 8) / 184;                 // 0..1 across the stands
-    const top = -6 - Math.sin(t * Math.PI) * 42; // dome line
-    for (let row = 0; row < 3; row++) {
-      const dot = document.createElementNS(SVGNS, 'circle');
-      dot.setAttribute('class', 'fan');
-      dot.setAttribute('cx', x.toFixed(1));
-      dot.setAttribute('cy', (top + 4 + row * 8.5).toFixed(1));
-      dot.setAttribute('r', '2.6');
-      dot.setAttribute('fill', FAN_COLORS[(c + row) % FAN_COLORS.length]);
-      dot.style.animationDelay = `${((c * 3 + row) % 12) * 0.18}s`;
+  const tiers = [256, 263, 270, 277, 284];
+  tiers.forEach((R, t) => {
+    const count = 34 + t * 3;
+    for (let i = 0; i <= count; i++) {
+      const deg = -142 + (104 * i) / count;
+      const [x, y] = polar(HOME[0], HOME[1], R, deg);
+      if (y < 6) continue; // keep inside the frame
+      const dot = elNS('circle', {
+        class: 'fan', cx: x.toFixed(1), cy: y.toFixed(1), r: 2.4,
+        fill: FAN_COLORS[(i + t) % FAN_COLORS.length],
+      });
+      dot.style.animationDelay = `${((i + t) % 12) * 0.16}s`;
       crowd.appendChild(dot);
     }
+  });
+}
+
+function buildLights() {
+  const g = $('#lights');
+  g.innerHTML = '';
+  for (const [bx, by] of [[78, 70], [322, 70]]) {
+    g.appendChild(elNS('line', { class: 'light-pole', x1: bx, y1: by + 60, x2: bx, y2: by + 14 }));
+    g.appendChild(elNS('rect', { class: 'light-bank', x: bx - 16, y: by - 6, width: 32, height: 20, rx: 3 }));
+    for (let r = 0; r < 2; r++) for (let c = 0; c < 4; c++) {
+      g.appendChild(elNS('circle', { class: 'bulb', cx: bx - 11 + c * 7, cy: by - 1 + r * 9, r: 2 }));
+    }
   }
+}
+
+// --- runners: figures that travel along the basepaths -----------------------
+
+const TEAM_COLORS = {
+  away: { jersey: '#e9ebef', dark: '#c3c7cf', cap: '#1f2d4d' },
+  home: { jersey: '#e0564f', dark: '#b53d37', cap: '#7c211c' },
+};
+
+let runners = []; // [{ el, base }]  base in 1|2|3 (or 'H' while batting)
+
+function runnerSVG({ jersey, dark, cap }) {
+  return `
+    <g transform="scale(1.35)">
+      <ellipse class="r-shadow" cx="0" cy="0" rx="7" ry="2.4"/>
+      <g class="r-body">
+        <rect x="-4" y="-9" width="3.2" height="9" rx="1.3" fill="${dark}"/>
+        <rect x="0.8" y="-9" width="3.2" height="9" rx="1.3" fill="${dark}"/>
+        <rect x="-7.5" y="-18" width="3" height="8" rx="1.4" fill="${jersey}"/>
+        <rect x="4.5" y="-18" width="3" height="8" rx="1.4" fill="${jersey}"/>
+        <rect x="-5" y="-19" width="10" height="11" rx="3.5" fill="${jersey}"/>
+      </g>
+      <circle class="r-head" cx="0" cy="-22.5" r="3.8" fill="#e3b78d"/>
+      <path d="M-4,-23.5 a4,4 0 0,1 8,0 z" fill="${cap}"/>
+      <rect x="0" y="-24.5" width="6" height="1.8" rx="0.9" fill="${cap}"/>
+    </g>`;
+}
+
+function createRunner(team) {
+  const g = elNS('g', { class: `runner ${team}` });
+  g.innerHTML = runnerSVG(TEAM_COLORS[team]);
+  $('#runners').appendChild(g);
+  return { el: g, base: 'H' };
+}
+
+function placeAt(el, key) {
+  const [x, y] = BASES[key];
+  el.style.transform = `translate(${x}px, ${y}px)`;
+}
+
+// Waypoint keys travelled from `from` to `to`, running the bases in order.
+function pathKeys(from, to) {
+  const start = RING.indexOf(from);
+  const steps = [];
+  const end = to === 'SCORE' ? 4 : RING.indexOf(to); // SCORE = past 3rd, back home
+  for (let i = start + 1; i <= end; i++) steps.push(i === 4 ? 'SCORE' : RING[i]);
+  return steps;
+}
+
+async function animateToken(token, from, to) {
+  const keys = pathKeys(from, to);
+  if (!keys.length) return;
+  const coords = [from, ...keys].map((k) => BASES[k]);
+  const frames = coords.map(([x, y]) => ({ transform: `translate(${x}px, ${y}px)` }));
+  const dur = Math.max(340, keys.length * 280);
+  token.el.classList.add('running');
+  let anim;
+  try { anim = token.el.animate(frames, { duration: dur, easing: 'ease-in-out', fill: 'forwards' }); } catch { /* no WAAPI */ }
+  // resolve on finish OR a hard timeout, so a throttled/paused tab never hangs the roll
+  await (anim ? Promise.race([anim.finished.catch(() => {}), sleep(dur + 250)]) : sleep(dur));
+  token.el.classList.remove('running');
+  placeAt(token.el, keys[keys.length - 1]);
+  try { anim && anim.cancel(); } catch { /* ignore */ }
+  if (to === 'SCORE') token.el.remove();
+}
+
+// Animate a whole play. `team` is who's batting (owns the batter + any runners).
+function animateMovements(moves, team) {
+  if (!moves.length) return Promise.resolve();
+  const plans = moves.map((m) => {
+    let token;
+    if (m.from === 'H') { token = createRunner(team); placeAt(token.el, 'H'); runners.push(token); }
+    else token = runners.find((t) => t.base === m.from);
+    return { token, from: m.from, to: m.to };
+  });
+  // commit base bookkeeping up front so concurrent lookups stay correct
+  plans.forEach((p) => { if (p.token && p.to !== 'SCORE') p.token.base = p.to; });
+  return Promise.all(plans.map((p) => (p.token ? animateToken(p.token, p.from, p.to) : null)));
+}
+
+// Drop runners that no longer belong (half ended) and backfill any missing.
+function reconcileRunners(team) {
+  runners = runners.filter((t) => {
+    const occupied = [1, 2, 3].includes(t.base) && game.bases[t.base - 1];
+    if (!occupied) { t.el.remove(); return false; }
+    return true;
+  });
+  game.bases.forEach((on, i) => {
+    const base = i + 1;
+    if (on && !runners.find((t) => t.base === base)) {
+      const tk = createRunner(team);
+      tk.base = base;
+      placeAt(tk.el, base);
+      runners.push(tk);
+    }
+  });
+}
+
+function clearRunners() {
+  $('#runners').innerHTML = '';
+  runners = [];
 }
 
 let mode = 'solo';
@@ -104,17 +256,8 @@ function renderLineScore() {
   $('#linescore').innerHTML = head.join('') + '<tbody>' + rows.join('') + '</tbody>';
 }
 
-let prevBases = [false, false, false];
-
 function renderSituation() {
-  const runnerEls = ['#runner-1', '#runner-2', '#runner-3'];
-  game.bases.forEach((on, i) => {
-    $(`#base-${i + 1}`).classList.toggle('on', on);
-    const runner = $(runnerEls[i]);
-    runner.classList.toggle('on', on);
-    if (on && !prevBases[i]) restartAnim(runner, 'dash'); // a runner just arrived
-  });
-  prevBases = game.bases.slice();
+  game.bases.forEach((on, i) => $(`#base-${i + 1}`).classList.toggle('on', on));
   document.querySelectorAll('.out-dot').forEach((dot) => {
     dot.classList.toggle('on', Number(dot.dataset.out) <= game.outs);
   });
@@ -218,7 +361,7 @@ function startGame(nextMode) {
   mode = nextMode;
   game = newGame(mode, buildTable(tableIds));
   busy = false;
-  prevBases = [false, false, false];
+  clearRunners();
   $('#result').textContent = 'Roll to start the game';
   $('#result').className = 'result';
   renderDie($('#die1'), 1);
@@ -226,51 +369,53 @@ function startGame(nextMode) {
   render();
 }
 
-function doRoll() {
+async function doRoll() {
   if (busy || game.status === 'final') return;
   busy = true;
   $('#roll').disabled = true;
   const d1 = $('#die1'), d2 = $('#die2');
   d1.classList.add('rolling');
   d2.classList.add('rolling');
-  restartAnim($('#batter'), 'swing');
   sound.unlock();
   sound.play('roll');
 
-  // brief tumble, cycling faces, then settle on the real roll
-  let ticks = 0;
-  const tumble = setInterval(() => {
+  // tumble the dice, then settle on the real roll
+  for (let i = 0; i < 6; i++) {
     renderDie(d1, 1 + Math.floor(Math.random() * 6));
     renderDie(d2, 1 + Math.floor(Math.random() * 6));
-    if (++ticks >= 6) {
-      clearInterval(tumble);
-      const roll = rollWith();
-      renderDie(d1, roll.d1);
-      renderDie(d2, roll.d2);
-      d1.classList.remove('rolling');
-      d2.classList.remove('rolling');
-      // only the batting team can score, so the change in total runs is the
-      // runs scored on this roll (regardless of any half-inning change after).
-      const before = game.score.away + game.score.home;
-      game = applyRoll(game, roll);
-      const runsScored = game.score.away + game.score.home - before;
-      renderResult(runsScored);
-      sound.play(pickSound({
-        outcome: game.lastRoll.outcome,
-        runsScored,
-        isFinal: game.status === 'final',
-      }));
-      if (runsScored > 0) cheer();
-      busy = false;
-      render();
-    }
-  }, 70);
+    await sleep(70);
+  }
+  const roll = rollWith();
+  renderDie(d1, roll.d1);
+  renderDie(d2, roll.d2);
+  d1.classList.remove('rolling');
+  d2.classList.remove('rolling');
+
+  // capture pre-roll state so we can animate who runs where
+  const table = game.outcomes || OUTCOMES;
+  const outcome = outcomeForSum(roll.sum, table);
+  const preBases = game.bases.slice();
+  const team = game.battingTeam;
+  const before = game.score.away + game.score.home;
+
+  game = applyRoll(game, roll);
+  const runsScored = game.score.away + game.score.home - before; // only batting team can score
+  renderResult(runsScored);
+  sound.play(pickSound({ outcome, runsScored, isFinal: game.status === 'final' }));
+  renderSituation();         // light up the destination bases as runners head there
+
+  await animateMovements(runnerMovements(preBases, outcome), team);
+  reconcileRunners(game.battingTeam);
+  if (runsScored > 0) cheer();
+
+  busy = false;
+  render();
 }
 
 function cheer() {
-  const svg = $('.diamond');
+  const svg = $('.field');
   restartAnim(svg, 'cheering');
-  setTimeout(() => svg.classList.remove('cheering'), 1900);
+  setTimeout(() => svg.classList.remove('cheering'), 2000);
 }
 
 function maybeCpuRoll() {
@@ -307,7 +452,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 // init
-buildCrowd();
+buildScenery();
 renderDie($('#die1'), 1);
 renderDie($('#die2'), 1);
 renderRules();

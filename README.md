@@ -47,6 +47,15 @@ logic.
 
 The game engine is identical across modes; the mode only decides who triggers a roll.
 
+## Presentation
+
+The field is a vector ballpark (striped outfield, dirt infield, mound, foul lines,
+warning track + wall, light towers, and a tiered animated crowd). Runners are drawn
+figures in the batting team's colours that **travel base-to-base** along the
+basepaths when they advance — the paths come from `runnerMovements` in
+`src/game.js` (pure + unit tested), and the UI animates them with the Web
+Animations API.
+
 ## Sound
 
 Effects are synthesized live with the Web Audio API (no audio files): a dice rattle

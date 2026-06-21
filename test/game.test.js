@@ -8,6 +8,7 @@ import {
   outcomeForSum,
   advanceRunners,
   applyWalk,
+  runnerMovements,
   newGame,
   applyRoll,
   rollWith,
@@ -120,6 +121,71 @@ test('a walk with the bases loaded forces in a run', () => {
   const { bases, runs } = applyWalk([true, true, true]);
   assert.deepEqual(bases, [true, true, true]);
   assert.equal(runs, 1);
+});
+
+// --- runner movements (for travel animation) --------------------------------
+
+const C = OUTCOME_CATALOG;
+
+test('an out moves nobody', () => {
+  assert.deepEqual(runnerMovements([true, true, true], C.STRIKEOUT), []);
+});
+
+test('a single with empty bases just sends the batter home->first', () => {
+  assert.deepEqual(runnerMovements([false, false, false], C.SINGLE), [
+    { from: 'H', to: 1 },
+  ]);
+});
+
+test('a single advances a runner on first and the batter', () => {
+  assert.deepEqual(runnerMovements([true, false, false], C.SINGLE), [
+    { from: 1, to: 2 },
+    { from: 'H', to: 1 },
+  ]);
+});
+
+test('a single scores the runner from third', () => {
+  assert.deepEqual(runnerMovements([false, false, true], C.SINGLE), [
+    { from: 3, to: 'SCORE' },
+    { from: 'H', to: 1 },
+  ]);
+});
+
+test('a grand slam sends all three runners and the batter across the plate', () => {
+  const moves = runnerMovements([true, true, true], C.HOME_RUN);
+  assert.equal(moves.filter((m) => m.to === 'SCORE').length, 4);
+  assert.ok(moves.some((m) => m.from === 'H' && m.to === 'SCORE'));
+});
+
+test('a walk only advances forced runners', () => {
+  // runner on second is NOT forced by a walk
+  assert.deepEqual(runnerMovements([false, true, false], C.WALK), [
+    { from: 'H', to: 1 },
+  ]);
+  // bases loaded: everyone behind the batter is forced up one
+  assert.deepEqual(runnerMovements([true, true, true], C.WALK), [
+    { from: 3, to: 'SCORE' },
+    { from: 2, to: 3 },
+    { from: 1, to: 2 },
+    { from: 'H', to: 1 },
+  ]);
+});
+
+test('the number of SCORE moves always equals the runs the engine awards', () => {
+  const bases = [
+    [false, false, false], [true, false, false], [false, true, false],
+    [false, false, true], [true, true, true], [true, false, true],
+  ];
+  for (const b of bases) {
+    for (const o of Object.values(C)) {
+      const moves = runnerMovements(b, o);
+      const scoreMoves = moves.filter((m) => m.to === 'SCORE').length;
+      const runs = o.type === 'out' ? 0
+        : o.type === 'walk' ? applyWalk(b).runs
+        : advanceRunners(b, o.bases).runs;
+      assert.equal(scoreMoves, runs, `mismatch for ${o.id} with ${b}`);
+    }
+  }
 });
 
 // --- game flow --------------------------------------------------------------

@@ -86,6 +86,39 @@ export function applyWalk(bases) {
   return { bases: next, runs };
 }
 
+// Describe how every runner (and the batter) moves on a play, so the UI can
+// animate them travelling along the basepaths. Returns a list of
+// { from, to } where `from`/`to` are 'H' (home plate), 1, 2, 3, or 'SCORE'
+// (crossed home and scored). The batter's move always starts at 'H'. This
+// mirrors advanceRunners/applyWalk exactly — it just exposes the paths.
+export function runnerMovements(bases, outcome) {
+  const moves = [];
+  if (outcome.type === 'out') return moves; // nobody advances in this model
+
+  if (outcome.type === 'walk') {
+    if (bases[0]) {
+      if (bases[1]) {
+        if (bases[2]) moves.push({ from: 3, to: 'SCORE' });
+        moves.push({ from: 2, to: 3 });
+      }
+      moves.push({ from: 1, to: 2 });
+    }
+    moves.push({ from: 'H', to: 1 }); // batter
+    return moves;
+  }
+
+  // hit: everyone advances `outcome.bases` bases
+  const n = outcome.bases;
+  for (let b = 3; b >= 1; b--) {
+    if (bases[b - 1]) {
+      const dest = b + n;
+      moves.push({ from: b, to: dest >= 4 ? 'SCORE' : dest });
+    }
+  }
+  moves.push({ from: 'H', to: n >= 4 ? 'SCORE' : n }); // batter
+  return moves;
+}
+
 export function newGame(mode = 'solo', table = OUTCOMES) {
   return {
     mode,
