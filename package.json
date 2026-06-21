@@ -1,0 +1,10 @@
+{
+  "name": "dice-baseball",
+  "version": "1.0.0",
+  "description": "A single-page baseball game played by rolling two dice.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  },
+  "license": "MIT"
+}

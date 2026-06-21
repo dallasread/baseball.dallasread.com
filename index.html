@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dice Baseball</title>
+  <meta name="description" content="A baseball game you play by rolling two dice." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚾</text></svg>" />
+</head>
+<body>
+  <main class="app">
+    <header class="topbar">
+      <h1 class="brand"><span class="ball">⚾</span> Dice Baseball</h1>
+      <div class="modes" role="group" aria-label="Game mode">
+        <button class="mode-btn" data-mode="solo">Solo</button>
+        <button class="mode-btn" data-mode="vs-cpu">Vs&nbsp;CPU</button>
+        <button class="mode-btn" data-mode="2p">2&nbsp;Players</button>
+      </div>
+      <button id="new-game" class="btn-ghost">New Game</button>
+    </header>
+
+    <section class="field-panel">
+      <!-- Scoreboard / line score -->
+      <div class="scoreboard">
+        <table id="linescore" aria-label="Line score"></table>
+      </div>
+
+      <!-- Diamond + situation -->
+      <div class="situation">
+        <div class="inning-pill">
+          <span id="inning-arrow" class="arrow">▲</span>
+          <span id="inning-label">Top 1st</span>
+        </div>
+
+        <div class="diamond-wrap">
+          <svg viewBox="0 -56 200 256" class="diamond" aria-hidden="true">
+            <!-- crowd stands behind the outfield -->
+            <path class="stands" d="M 8 -8 Q 100 -64 192 -8 L 192 6 Q 100 -44 8 6 Z" />
+            <g id="crowd"></g>
+
+            <!-- grass + dirt -->
+            <polygon class="grass" points="100,8 196,104 100,200 4,104" />
+            <polygon class="infield" points="100,30 170,100 100,170 30,100" />
+            <path class="basepath" d="M 100 170 L 170 100 L 100 30 L 30 100 Z" />
+
+            <!-- bases: 2B top, 3B left, 1B right, home bottom -->
+            <rect id="base-2" class="base" x="91" y="21" width="18" height="18" rx="3" transform="rotate(45 100 30)" />
+            <rect id="base-3" class="base" x="21" y="91" width="18" height="18" rx="3" transform="rotate(45 30 100)" />
+            <rect id="base-1" class="base" x="161" y="91" width="18" height="18" rx="3" transform="rotate(45 170 100)" />
+            <polygon class="home-plate" points="100,162 108,170 108,180 92,180 92,170" />
+
+            <!-- runners + batter (emoji figures) -->
+            <text id="runner-1" class="runner" x="170" y="100">🏃</text>
+            <text id="runner-2" class="runner" x="100" y="30">🏃</text>
+            <text id="runner-3" class="runner" x="30" y="100">🏃</text>
+            <text id="batter" class="batter" x="100" y="171">🧍</text>
+          </svg>
+        </div>
+
+        <div class="outs">
+          <span class="outs-label">Outs</span>
+          <span class="out-dot" data-out="1"></span>
+          <span class="out-dot" data-out="2"></span>
+          <span class="out-dot" data-out="3"></span>
+        </div>
+      </div>
+
+      <!-- Turn + dice + roll -->
+      <div class="play">
+        <div id="turn" class="turn">Away is batting</div>
+        <div class="dice" id="dice">
+          <div class="die" id="die1" data-face="1"></div>
+          <div class="die" id="die2" data-face="1"></div>
+        </div>
+        <div id="result" class="result">Roll to start the game</div>
+        <button id="roll" class="btn-roll">Roll the dice</button>
+      </div>
+    </section>
+
+    <aside class="side">
+      <div class="log-panel">
+        <h2>Play-by-play</h2>
+        <ul id="log" class="log"></ul>
+      </div>
+
+      <details class="rules-panel">
+        <summary>Dice rules <span class="hint">(edit any cell)</span></summary>
+        <p class="rules-note">Each at-bat is one roll of two dice. The sum picks the outcome. Edit a row to change the rules for this game.</p>
+        <table id="rules-table" class="rules-table"></table>
+      </details>
+    </aside>
+
+    <div id="banner" class="banner hidden" role="alert"></div>
+  </main>
+
+  <script type="module" src="src/ui.js"></script>
+</body>
+</html>
