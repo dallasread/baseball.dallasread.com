@@ -208,6 +208,14 @@ function clearRunners() {
   runners = [];
 }
 
+// Cancel any in-flight travel animations and pin every runner on its base.
+function snapRunnersToBases() {
+  runners.forEach((t) => {
+    try { t.el.getAnimations?.().forEach((a) => a.cancel()); } catch { /* ignore */ }
+    if ([1, 2, 3].includes(t.base)) placeAt(t.el, t.base);
+  });
+}
+
 let mode = 'solo';
 let tableIds = { ...DEFAULT_TABLE_IDS };
 let game = newGame(mode, buildTable(tableIds));
@@ -369,47 +377,60 @@ function startGame(nextMode) {
   render();
 }
 
+// Cap on how long a play's travel animation may hold up the next roll. The
+// roll proceeds after this even if an animation never settles (e.g. a
+// backgrounded tab pausing the Web Animations API), so the button can't hang.
+const ANIM_CAP_MS = 2200;
+
 async function doRoll() {
   if (busy || game.status === 'final') return;
   busy = true;
   $('#roll').disabled = true;
   const d1 = $('#die1'), d2 = $('#die2');
-  d1.classList.add('rolling');
-  d2.classList.add('rolling');
-  sound.unlock();
-  sound.play('roll');
+  try {
+    snapRunnersToBases(); // clear any figures still in flight from a prior play
+    d1.classList.add('rolling');
+    d2.classList.add('rolling');
+    sound.unlock();
+    sound.play('roll');
 
-  // tumble the dice, then settle on the real roll
-  for (let i = 0; i < 6; i++) {
-    renderDie(d1, 1 + Math.floor(Math.random() * 6));
-    renderDie(d2, 1 + Math.floor(Math.random() * 6));
-    await sleep(70);
+    // tumble the dice, then settle on the real roll
+    for (let i = 0; i < 6; i++) {
+      renderDie(d1, 1 + Math.floor(Math.random() * 6));
+      renderDie(d2, 1 + Math.floor(Math.random() * 6));
+      await sleep(70);
+    }
+    const roll = rollWith();
+    renderDie(d1, roll.d1);
+    renderDie(d2, roll.d2);
+
+    // capture pre-roll state so we can animate who runs where
+    const table = game.outcomes || OUTCOMES;
+    const outcome = outcomeForSum(roll.sum, table);
+    const preBases = game.bases.slice();
+    const team = game.battingTeam;
+    const before = game.score.away + game.score.home;
+
+    game = applyRoll(game, roll);
+    const runsScored = game.score.away + game.score.home - before; // only batting team can score
+    renderResult(runsScored);
+    sound.play(pickSound({ outcome, runsScored, isFinal: game.status === 'final' }));
+    renderSituation();       // light up the destination bases as runners head there
+
+    await Promise.race([
+      animateMovements(runnerMovements(preBases, outcome), team).catch(() => {}),
+      sleep(ANIM_CAP_MS),
+    ]);
+    reconcileRunners(game.battingTeam);
+    if (runsScored > 0) cheer();
+  } catch (err) {
+    console.error('roll failed:', err);
+  } finally {
+    d1.classList.remove('rolling');
+    d2.classList.remove('rolling');
+    busy = false;
+    render();
   }
-  const roll = rollWith();
-  renderDie(d1, roll.d1);
-  renderDie(d2, roll.d2);
-  d1.classList.remove('rolling');
-  d2.classList.remove('rolling');
-
-  // capture pre-roll state so we can animate who runs where
-  const table = game.outcomes || OUTCOMES;
-  const outcome = outcomeForSum(roll.sum, table);
-  const preBases = game.bases.slice();
-  const team = game.battingTeam;
-  const before = game.score.away + game.score.home;
-
-  game = applyRoll(game, roll);
-  const runsScored = game.score.away + game.score.home - before; // only batting team can score
-  renderResult(runsScored);
-  sound.play(pickSound({ outcome, runsScored, isFinal: game.status === 'final' }));
-  renderSituation();         // light up the destination bases as runners head there
-
-  await animateMovements(runnerMovements(preBases, outcome), team);
-  reconcileRunners(game.battingTeam);
-  if (runsScored > 0) cheer();
-
-  busy = false;
-  render();
 }
 
 function cheer() {
