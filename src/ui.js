@@ -7,6 +7,9 @@ import {
   rollWith,
   teamName,
 } from './game.js';
+import { createSoundPlayer, pickSound } from './sound.js';
+
+const sound = createSoundPlayer();
 
 // Pip coordinates (1..9 grid cells) for each die face.
 const PIPS = {
@@ -231,6 +234,8 @@ function doRoll() {
   d1.classList.add('rolling');
   d2.classList.add('rolling');
   restartAnim($('#batter'), 'swing');
+  sound.unlock();
+  sound.play('roll');
 
   // brief tumble, cycling faces, then settle on the real roll
   let ticks = 0;
@@ -250,6 +255,11 @@ function doRoll() {
       game = applyRoll(game, roll);
       const runsScored = game.score.away + game.score.home - before;
       renderResult(runsScored);
+      sound.play(pickSound({
+        outcome: game.lastRoll.outcome,
+        runsScored,
+        isFinal: game.status === 'final',
+      }));
       if (runsScored > 0) cheer();
       busy = false;
       render();
@@ -276,6 +286,12 @@ document.querySelectorAll('.mode-btn').forEach((btn) =>
   btn.addEventListener('click', () => startGame(btn.dataset.mode)));
 
 $('#new-game').addEventListener('click', () => startGame(mode));
+
+$('#sound-toggle').addEventListener('click', () => {
+  const muted = sound.toggle();
+  $('#sound-toggle').textContent = muted ? '🔇' : '🔊';
+  if (!muted) { sound.unlock(); sound.play('walk'); } // quick blip to confirm
+});
 $('#roll').addEventListener('click', doRoll);
 
 $('#rules-table').addEventListener('change', (e) => {

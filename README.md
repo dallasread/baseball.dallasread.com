@@ -47,6 +47,14 @@ logic.
 
 The game engine is identical across modes; the mode only decides who triggers a roll.
 
+## Sound
+
+Effects are synthesized live with the Web Audio API (no audio files): a dice rattle
+on every roll, a bat crack on a hit, a descending tone on an out, a blip on a walk,
+a rising arpeggio + crowd swell when runs score, and a fanfare on the final out.
+Toggle with the 🔊 button. The event→sound mapping (`pickSound` in `src/sound.js`)
+is pure and unit tested.
+
 ## Project layout
 
 ```
